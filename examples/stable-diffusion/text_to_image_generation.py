@@ -126,6 +126,12 @@ def main():
         ),
     )
     parser.add_argument(
+        "--control_conditioning_scale",
+        type=float,
+        default=1.0,
+        help=("Specifies how strictly to follow the controlnet conditoning image."),
+    )
+    parser.add_argument(
         "--num_images_per_prompt", type=int, default=1, help="The number of images to generate per prompt."
     )
     parser.add_argument("--batch_size", type=int, default=1, help="The number of images in a batch.")
@@ -254,6 +260,12 @@ def main():
         help="Path to pre-trained model",
     )
     parser.add_argument(
+        "--vae_adapter_name_or_path",
+        default=None,
+        type=str,
+        help="Path to pre-trained model",
+    )
+    parser.add_argument(
         "--text_encoder_adapter_name_or_path",
         default=None,
         type=str,
@@ -279,6 +291,7 @@ def main():
     sd3 = True if any(model in args.model_name_or_path for model in sd3_models) else False
     controlnet = True if args.control_image is not None else False
     inpainting = True if (args.base_image is not None) and (args.mask_image is not None) else False
+    vae = True if args.vae_adapter_name_or_path is not None else False
 
     # Set the scheduler
     kwargs = {"timestep_spacing": args.timestep_spacing}
@@ -319,6 +332,12 @@ def main():
         "profiling_warmup_steps": args.profiling_warmup_steps,
         "profiling_steps": args.profiling_steps,
     }
+
+    if vae:
+        kwargs_call["vae"] = args.vae_adapter_name_or_path
+
+    if controlnet:
+        kwargs_call["controlnet_conditioning_scale"] = args.control_conditioning_scale
 
     if args.width > 0 and args.height > 0:
         kwargs_call["width"] = args.width
@@ -393,7 +412,19 @@ def main():
         # SDXL pipelines
         if controlnet:
             # Import SDXL+ControlNet pipeline
-            raise ValueError("SDXL+ControlNet pipeline is not currenly supported")
+            from diffusers import ControlNetModel
+
+            from optimum.habana.diffusers import GaudiStableDiffusionXLControlNetPipeline
+
+            model_dtype = torch.bfloat16 if args.bf16 else None
+            controlnet = ControlNetModel.from_pretrained(args.controlnet_model_name_or_path, torch_dtype=model_dtype)
+            pipeline = GaudiStableDiffusionXLControlNetPipeline.from_pretrained(
+                args.model_name_or_path,
+                controlnet=controlnet,
+                **kwargs,
+            )
+            if args.lora_id:
+                pipeline.load_lora_weights(args.lora_id)
 
         elif inpainting:
             # Import SDXL Inpainting pipeline
