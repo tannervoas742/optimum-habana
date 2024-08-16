@@ -1717,8 +1717,6 @@ class GaudiGenerationMixin(GenerationMixin):
 
         # keep track of which sequences are already finished
         batch_size, cur_len = input_ids.shape
-        if "inputs_embeds" in model_kwargs:
-            cur_len = model_kwargs["inputs_embeds"].shape[1]
         this_peer_finished = False
         if not ignore_eos:
             unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
@@ -2139,8 +2137,6 @@ class GaudiGenerationMixin(GenerationMixin):
         # keep track of which sequences are already finished
         # TODO: no ignore_eos check here since there is a compilation error, will add ignore_eos here if fixed
         batch_size, cur_len = input_ids.shape
-        if "inputs_embeds" in model_kwargs:
-            cur_len = model_kwargs["inputs_embeds"].shape[1]
         this_peer_finished = False
         unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
         model_kwargs["cache_position"] = torch.arange(cur_len, device=input_ids.device)
@@ -3890,8 +3886,6 @@ class GaudiGenerationMixin(GenerationMixin):
 
         # keep track of which sequences are already finished
         batch_size, cur_len = input_ids.shape
-        if "inputs_embeds" in model_kwargs:
-            cur_len = model_kwargs["inputs_embeds"].shape[1]
         if not ignore_eos:
             unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
         model_kwargs["cache_position"] = torch.arange(cur_len, device=input_ids.device)
