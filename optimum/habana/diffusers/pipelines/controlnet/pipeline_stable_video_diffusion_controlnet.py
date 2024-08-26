@@ -736,11 +736,27 @@ class GaudiStableVideoDiffusionPipelineControlNet(GaudiStableVideoDiffusionPipel
                 graph_inputs = inputs
                 graph_outputs = outputs
                 self.cache[h] = self.ht.hpu.graphs.CachedParams(graph_inputs, graph_outputs, graph)
+            self._clear_cache()
             return outputs
 
         # Replay the cached graph with updated inputs
         self.ht.hpu.graphs.copy_to(cached.graph_inputs, inputs)
         cached.graph.replay()
         self.ht.core.hpu.default_stream().synchronize()
-
+        self._clear_cache()
         return cached.graph_outputs
+    
+    def _clear_cache(self):
+        if self.use_hpu_graphs:
+            if hasattr(self.vae, "clear_cache"):
+                self.vae.clear_cache()
+            if hasattr(self.image_encoder, "clear_cache"):
+                self.image_encoder.clear_cache()
+            if hasattr(self.unet, "clear_cache"):
+                self.unet.clear_cache()
+            if hasattr(self.controlnet, "clear_cache"):
+                self.controlnet.clear_cache()
+            if hasattr(self.scheduler, "clear_cache"):
+                self.scheduler.clear_cache()
+            if hasattr(self.feature_extractor, "clear_cache"):
+                self.feature_extractor.clear_cache()

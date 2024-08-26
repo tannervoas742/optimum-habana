@@ -896,7 +896,7 @@ class GaudiStableDiffusionXLControlNetPipeline(
                 start_time_after_warmup=t1,
             )
             logger.info(f"Speed metrics: {speed_measures}")
-
+            self._clear_cache()
             if not return_dict:
                 return (image,)
 
@@ -904,3 +904,22 @@ class GaudiStableDiffusionXLControlNetPipeline(
                 images=outputs["images"],
                 throughput=speed_measures[f"{speed_metrics_prefix}_samples_per_second"],
             )
+    
+    def _clear_cache(self):
+        if self.use_hpu_graphs:
+            if hasattr(self.vae, "clear_cache"):
+                self.vae.clear_cache()
+            if hasattr(self.text_encoder, "clear_cache"):
+                self.text_encoder.clear_cache()
+            if hasattr(self.text_encoder_2, "clear_cache"):
+                self.text_encoder_2.clear_cache()
+            if hasattr(self.tokenizer, "clear_cache"):
+                self.tokenizer.clear_cache()
+            if hasattr(self.tokenizer_2, "clear_cache"):
+                self.tokenizer_2.clear_cache()
+            if hasattr(self.unet, "clear_cache"):
+                self.unet.clear_cache()
+            if hasattr(self.controlnet, "clear_cache"):
+                self.controlnet.clear_cache()
+            if hasattr(self.scheduler, "clear_cache"):
+                self.scheduler.clear_cache()

@@ -572,7 +572,7 @@ class GaudiStableVideoDiffusionPipeline(GaudiDiffusionPipeline, StableVideoDiffu
                     outputs["frames"] += [*frames]
 
             self.maybe_free_model_hooks()
-
+            self._clear_cache()
             if not return_dict:
                 return outputs["frames"]
 
@@ -580,3 +580,16 @@ class GaudiStableVideoDiffusionPipeline(GaudiDiffusionPipeline, StableVideoDiffu
                 frames=outputs["frames"],
                 throughput=speed_measures[f"{speed_metrics_prefix}_samples_per_second"],
             )
+    
+    def _clear_cache(self):
+        if self.use_hpu_graphs:
+            if hasattr(self.vae, "clear_cache"):
+                self.vae.clear_cache()
+            if hasattr(self.image_encoder, "clear_cache"):
+                self.image_encoder.clear_cache()
+            if hasattr(self.unet, "clear_cache"):
+                self.unet.clear_cache()
+            if hasattr(self.scheduler, "clear_cache"):
+                self.scheduler.clear_cache()
+            if hasattr(self.feature_extractor, "clear_cache"):
+                self.feature_extractor.clear_cache()
