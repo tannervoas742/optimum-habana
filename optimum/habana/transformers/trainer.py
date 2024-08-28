@@ -557,6 +557,8 @@ class GaudiTrainer(Trainer):
         trial=None,
         ignore_keys_for_eval=None,
     ):
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._inner_training_loop: Start")
         self.accelerator.free_memory()
         self._train_batch_size = batch_size
         if self.args.auto_find_batch_size:
@@ -837,6 +839,8 @@ class GaudiTrainer(Trainer):
 
         # tr_loss is a tensor to avoid synchronization of TPUs through .item()
         tr_loss = torch.tensor(0.0).to(args.device)
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print(f"OH: GaudiTrainer._inner_training_loop: tr_loss={tr_loss} 1")
         # _total_loss_scalar is updated everytime .item() has to be called on tr_loss and stores the sum of all losses
         self._total_loss_scalar = 0.0
         self._globalstep_last_logged = self.state.global_step
@@ -908,6 +912,8 @@ class GaudiTrainer(Trainer):
 
             step = -1
             for step, inputs in enumerate(epoch_iterator):
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print(f"OH: GaudiTrainer._inner_training_loop: step={step}")
                 if (
                     args.throughput_warmup_steps > 0
                     and (args.throughput_warmup_steps * args.gradient_accumulation_steps)
@@ -967,8 +973,12 @@ class GaudiTrainer(Trainer):
                 with self.accelerator.accumulate(model):
                     tr_loss_step = self.training_step(model, inputs)
 
+                is_last_step = (
+                    (step + 1) == steps_in_epoch
+                )
+
                 is_last_step_and_steps_less_than_grad_acc = (
-                    steps_in_epoch <= args.gradient_accumulation_steps and (step + 1) == steps_in_epoch
+                    steps_in_epoch <= args.gradient_accumulation_steps and is_last_step
                 )
 
                 is_optimization_step = (
@@ -986,7 +996,6 @@ class GaudiTrainer(Trainer):
                     all_reduce_gradients(
                         model, use_hpu_graphs=True
                     )  # use HPU graphs for gradient fusion regardless of args.use_hpu_graphs_for_training setting
-
                 if args.logging_nan_inf_filter and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step)):
                     # if loss is nan or inf simply add the average of previous logged losses
                     tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
@@ -1036,8 +1045,13 @@ class GaudiTrainer(Trainer):
                     if args.use_lazy_mode:
                         self.htcore.mark_step()
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
-
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._inner_training_loop: maybe call 1")
+                    if is_last_step:
+                        self.control.should_log = False
                     self._maybe_log_save_evaluate(tr_loss, _grad_norm, model, trial, epoch, ignore_keys_for_eval)
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._inner_training_loop: maybe call 2")
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
 
@@ -1053,7 +1067,12 @@ class GaudiTrainer(Trainer):
                 self.control.should_training_stop = True
 
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._inner_training_loop: maybe call 3")
+            self.control.should_log = False
             self._maybe_log_save_evaluate(tr_loss, _grad_norm, model, trial, epoch, ignore_keys_for_eval)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._inner_training_loop: maybe call 4")
 
             if self.control.should_training_stop:
                 break
@@ -1103,13 +1122,19 @@ class GaudiTrainer(Trainer):
         checkpoints_sorted = self._sorted_checkpoints(use_mtime=False, output_dir=run_dir)
 
         # Delete the last checkpoint when save_total_limit=1 if it's different from the best checkpoint and process allowed to save.
+
         if self.args.should_save and self.state.best_model_checkpoint is not None and self.args.save_total_limit == 1:
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._inner_training_loop: should save 1")
             for checkpoint in checkpoints_sorted:
                 if not os.path.samefile(checkpoint, self.state.best_model_checkpoint):
                     logger.info(f"Deleting older checkpoint [{checkpoint}] due to args.save_total_limit")
                     shutil.rmtree(checkpoint)
-
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._inner_training_loop: on train end 1")
         self.control = self.callback_handler.on_train_end(args, self.state, self.control)
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._inner_training_loop: on train end 2")
 
         # Wait for the checkpoint to be uploaded.
         self._finish_current_push()
@@ -1118,7 +1143,8 @@ class GaudiTrainer(Trainer):
         # for the embedding layer by removing the forward post hook.
         if self.neftune_noise_alpha is not None:
             self._deactivate_neftune(self.model)
-
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._inner_training_loop: End")
         return TrainOutput(self.state.global_step, train_loss, metrics)
 
     def _load_best_model(self):
@@ -1196,64 +1222,127 @@ class GaudiTrainer(Trainer):
             )
 
     def _maybe_log_save_evaluate(self, tr_loss, _grad_norm, model, trial, epoch, ignore_keys_for_eval):
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._maybe_log_save_evaluate: Start")
         if self.args.adjust_throughput:
             save_start = time.perf_counter()
-
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 1")
         if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
             logs: Dict[str, float] = {}
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 2")
 
             # all_gather + mean() to get average loss over all processes
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print(f"OH: GaudiTrainer._maybe_log_save_evaluate: Break 2+: tr_loss={tr_loss}")
+            tr_loss_scalar = self._nested_gather(tr_loss)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print(f"OH: GaudiTrainer._maybe_log_save_evaluate: Break 2+: self._nested_gather(tr_loss).mean()")
+            tr_loss_scalar = self._nested_gather(tr_loss).mean()
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print(f"OH: GaudiTrainer._maybe_log_save_evaluate: Break 2+: self._nested_gather(tr_loss).mean().item()")
             tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 3")
 
             # reset tr_loss to zero
             tr_loss -= tr_loss
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 4")
 
             # This grad_norm block was outside of _maybe_log_save_evaluate method causing perf degradataion.
             # Moving it here so the grad tensor is only copied when it's needed.
             if is_accelerate_available() and self.accelerator.distributed_type == GaudiDistributedType.DEEPSPEED:
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 5")
                 grad_norm = model.get_global_grad_norm()
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 6")
                 # In some cases the grad norm may not return a float
                 if hasattr(grad_norm, "item"):
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 7")
                     grad_norm = grad_norm.item()
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 8")
             else:
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 9")
                 if (
                     _grad_norm is not None
                     and self.accelerator.distributed_type != GaudiDistributedType.FSDP
                     and _grad_norm.size() == torch.Size([1])
                 ):
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 10")
                     grad_norm = _grad_norm.item()
+                    if self.args.local_rank == 0 or self.args.local_rank == -1:
+                        print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 11")
                 else:
                     grad_norm = None
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 12")
 
             if grad_norm is not None:
                 logs["grad_norm"] = grad_norm
             logs["learning_rate"] = self._get_learning_rate()
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 13")
 
             self._total_loss_scalar += tr_loss_scalar
             self._globalstep_last_logged = self.state.global_step
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 14")
             self.store_flos()
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 15")
 
             self.log(logs)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 16")
 
         metrics = None
         if self.control.should_evaluate:
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 17")
             metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 18")
             self._report_to_hp_search(trial, self.state.global_step, metrics)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 19")
 
             # Run delayed LR scheduler now that metrics are populated
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 20")
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 metric_to_check = self.args.metric_for_best_model
                 if not metric_to_check.startswith("eval_"):
                     metric_to_check = f"eval_{metric_to_check}"
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 21")
                 self.lr_scheduler.step(metrics[metric_to_check])
+                if self.args.local_rank == 0 or self.args.local_rank == -1:
+                    print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 22")
 
         if self.control.should_save:
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 23")
             self._save_checkpoint(model, trial, metrics=metrics)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 24")
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+            if self.args.local_rank == 0 or self.args.local_rank == -1:
+                print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 25")
 
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._maybe_log_save_evaluate: Break 26")
         if self.args.adjust_throughput:
             self.log_evaluate_save_time += time.perf_counter() - save_start
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._maybe_log_save_evaluate: End")
 
     def _load_rng_state(self, checkpoint):
         # Load RNG states from `checkpoint`
@@ -1298,7 +1387,8 @@ class GaudiTrainer(Trainer):
         # In all cases, including ddp/dp/deepspeed, self.model is always a reference to the model we
         # want to save except FullyShardedDDP.
         # assert unwrap_model(model) is self.model, "internal model should be a reference to self.model"
-
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_checkpoint: Start")
         # Save model checkpoint
         checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"
 
@@ -1343,8 +1433,12 @@ class GaudiTrainer(Trainer):
             # Solely rely on numerical checkpoint id for rotation.
             # mtime is not reliable especially on some fuse fs in cloud environments.
             self._rotate_checkpoints(use_mtime=False, output_dir=run_dir)
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_checkpoint: End")
 
     def _save_rng_state(self, output_dir):
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_rng_state: Start")
         # Save RNG state in non-distributed training
         rng_states = {
             "python": random.getstate(),
@@ -1367,8 +1461,12 @@ class GaudiTrainer(Trainer):
             torch.save(rng_states, os.path.join(output_dir, "rng_state.pth"))
         else:
             torch.save(rng_states, os.path.join(output_dir, f"rng_state_{self.args.process_index}.pth"))
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_rng_state: End")
 
     def _save_optimizer_and_scheduler(self, output_dir):
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_optimizer_and_scheduler: Start")
         if self.is_deepspeed_enabled:
             # under zero3 model file itself doesn't get saved since it's bogus! Unless deepspeed
             # config `stage3_gather_16bit_weights_on_model_save` is True
@@ -1408,6 +1506,8 @@ class GaudiTrainer(Trainer):
             with warnings.catch_warnings(record=True) as caught_warnings:
                 torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, SCHEDULER_NAME))
             reissue_pt_warnings(caught_warnings)
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save_optimizer_and_scheduler: End")
 
     def _load_optimizer_and_scheduler(self, checkpoint):
         """If optimizer and scheduler states exist, load them."""
@@ -1567,6 +1667,8 @@ class GaudiTrainer(Trainer):
         Will save the model, so you can reload it using `from_pretrained()`.
         Will only save from the main process.
         """
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer.save_model: Start")
         if output_dir is None:
             output_dir = self.args.output_dir
 
@@ -1602,8 +1704,12 @@ class GaudiTrainer(Trainer):
         # Push to the Hub when `save_model` is called by the user.
         if self.args.push_to_hub and not _internal_call:
             self.push_to_hub(commit_message="Model save")
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer.save_model: End")
 
     def _save(self, output_dir: Optional[str] = None, state_dict=None):
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save: Start")
         # If we are executing this function, we are the process zero, so we don't check for that.
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -1644,6 +1750,8 @@ class GaudiTrainer(Trainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
+        if self.args.local_rank == 0 or self.args.local_rank == -1:
+            print("OH: GaudiTrainer._save: End")
 
     def evaluate(
         self,
