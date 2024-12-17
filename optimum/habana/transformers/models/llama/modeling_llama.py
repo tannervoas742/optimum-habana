@@ -93,6 +93,7 @@ class GaudiLlamaRotaryEmbedding(torch.nn.Module):
         rope_type="default",
         config: Optional[LlamaConfig] = None,
     ):
+        print('Start:', GaudiLlamaRotaryEmbedding)
         super().__init__()
 
         # TODO (joao): remove the `if` below, only used for BC
@@ -132,6 +133,7 @@ class GaudiLlamaRotaryEmbedding(torch.nn.Module):
         self._set_cos_sin_cache(
             seq_len=self.max_seq_len_cached, device=self.inv_freq.device, dtype=torch.get_default_dtype()
         )
+        print('End:', GaudiLlamaRotaryEmbedding)
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
         self.max_seq_len_cached = seq_len
@@ -185,12 +187,14 @@ class GaudiLlamaRotaryEmbedding(torch.nn.Module):
 
 class GaudiLlamaLinearScalingRotaryEmbedding(GaudiLlamaRotaryEmbedding):
     def __init__(self, *args, **kwargs):
+        print('Start:', GaudiLlamaLinearScalingRotaryEmbedding)
         logger.warning_once(
             "`LlamaLinearScalingRotaryEmbedding` is deprecated an will be removed in v4.46. Please use "
             "`LlamaRotaryEmbedding`, which now also does linear scaling (simply pass the model config to __init__)."
         )
         kwargs["rope_type"] = "linear"
         super().__init__(*args, **kwargs)
+        print('End:', GaudiLlamaLinearScalingRotaryEmbedding)
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
         self.max_seq_len_cached = seq_len
@@ -206,6 +210,7 @@ class GaudiLlamaLinearScalingRotaryEmbedding(GaudiLlamaRotaryEmbedding):
 
 class GaudiLlamaDynamicNTKScalingRotaryEmbedding(GaudiLlamaRotaryEmbedding):
     def __init__(self, *args, **kwargs):
+        print('Start:', GaudiLlamaDynamicNTKScalingRotaryEmbedding)
         logger.warning_once(
             "`LlamaDynamicNTKScalingRotaryEmbedding` is deprecated an will be removed in v4.46. Please use "
             "`LlamaRotaryEmbedding`, which now also does dynamic ntk scaling (simply pass the model config to "
@@ -213,6 +218,7 @@ class GaudiLlamaDynamicNTKScalingRotaryEmbedding(GaudiLlamaRotaryEmbedding):
         )
         kwargs["rope_type"] = "dynamic"
         super().__init__(*args, **kwargs)
+        print('End:', GaudiLlamaDynamicNTKScalingRotaryEmbedding)
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
         self.max_seq_len_cached = seq_len
@@ -235,6 +241,7 @@ class GaudiLlamaDynamicNTKScalingRotaryEmbedding(GaudiLlamaRotaryEmbedding):
 
 class GaudiLlamaMLP(LlamaMLP):
     def __init__(self, config):
+        print('Start:', GaudiLlamaMLP)
         super(LlamaMLP, self).__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -243,6 +250,7 @@ class GaudiLlamaMLP(LlamaMLP):
         self.up_proj = torch.nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
         self.down_proj = torch.nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
         self.act_fn = ACT2FN[config.hidden_act]
+        print('End:', GaudiLlamaMLP)
 
     def pre_mlp_forward(self, x):
         if self.config.pretraining_tp > 1:
@@ -284,6 +292,7 @@ class TPGaudiLlamaMLP(GaudiLlamaMLP, TPModule):
         config,
         group: Optional[ProcessGroup] = None,
     ):
+        print('Start:', TPGaudiLlamaMLP)
         assert torch.distributed.is_initialized()
         rank, world_size = distributed.rank_and_world(group)
         hidden_dim = int(config.hidden_grow_factor * config.hidden_size)
@@ -293,6 +302,7 @@ class TPGaudiLlamaMLP(GaudiLlamaMLP, TPModule):
         self.config.intermediate_size = int((config.hidden_grow_factor / world_size) * config.hidden_size)
         GaudiLlamaMLP.__init__(self, self.config)
         self.setup_tp(rank, world_size)
+        print('End:', TPGaudiLlamaMLP)
 
     def colwise_param_names(self) -> List[str]:
         return ["up_proj", "gate_proj"]
@@ -349,12 +359,14 @@ def gaudi_llama_repeat_kv(
 # FusedScaledDotProductAttention
 class ModuleFusedSDPA(torch.nn.Module):
     def __init__(self, fusedSDPA, scale, attention_dropout, enable_recompute, flash_attention_fp8):
+        print('Start:', ModuleFusedSDPA)
         super().__init__()
         self._hpu_kernel_fsdpa = fusedSDPA
         self.scale = scale
         self.attention_dropout = attention_dropout
         self.enable_recompute = enable_recompute
         self.flash_attention_fp8 = flash_attention_fp8
+        print('End:', ModuleFusedSDPA)
 
     def forward(
         self,
@@ -434,6 +446,7 @@ def GaudiDistributedAttention(fused_scaled_dot_product_attention, fused_scaled_d
 
 class GaudiLlamaAttention(LlamaAttention):
     def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
+        print('Start:', GaudiLlamaAttention)
         super().__init__(config, layer_idx)
 
         self.matmul_qk = Matmul()
@@ -476,6 +489,7 @@ class GaudiLlamaAttention(LlamaAttention):
             self.fused_scaled_dot_product_attention_distributed = DistributedAttention(
                 self.fused_scaled_dot_product_attention, parallel_state.get_sequence_parallel_group(), 1, 2
             )
+        print('End:', GaudiLlamaAttention)
 
     def get_k_proj_weight(self):
         """4bit quantization in GPTQ replaces the k_proj.weight with qweight."""
@@ -890,6 +904,7 @@ class TPGaudiLlamaAttention(GaudiLlamaAttention, TPModule):
 
 class GaudiLlamaDecoderLayer(LlamaDecoderLayer):
     def __init__(self, config: LlamaConfig, layer_idx: int):
+        print('Start:', GaudiLlamaDecoderLayer)
         super(LlamaDecoderLayer, self).__init__()
         self.hidden_size = config.hidden_size
 
@@ -898,6 +913,7 @@ class GaudiLlamaDecoderLayer(LlamaDecoderLayer):
         self.mlp = GaudiLlamaMLP(config)
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        print('End:', GaudiLlamaDecoderLayer)
 
     def allocate_kv_cache(self, batch_size, max_seq_len, inp_seq_len):
         self.self_attn.allocate_kv_cache(batch_size, max_seq_len, inp_seq_len)
@@ -1060,6 +1076,7 @@ class GaudiLlamaModel(LlamaModel):
         1. set fill_value to 1 instead of True
         2. add device=self.device
         """
+        print('Start:', GaudiLlamaModel)
         super(LlamaModel, self).__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -1079,6 +1096,7 @@ class GaudiLlamaModel(LlamaModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+        print('End:', GaudiLlamaModel)
 
     def allocate_kv_cache(self, batch_size, max_seq_len, inp_seq_len):
         for layer in self.layers:
@@ -1315,8 +1333,10 @@ class GaudiLlamaForCausalLM(LlamaForCausalLM):
     """
 
     def __init__(self, config, parallel_strategy: DistributedStrategy = NoOpStrategy):
+        print('Start:', GaudiLlamaForCausalLM)
         config.parallel_strategy = parallel_strategy
         super().__init__(config)
+        print('End:', GaudiLlamaForCausalLM)
 
     def allocate_kv_cache(self, batch_size, max_seq_len, inp_seq_len):
         self.model.allocate_kv_cache(batch_size, max_seq_len, inp_seq_len)
