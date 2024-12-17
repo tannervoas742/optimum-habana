@@ -31,6 +31,7 @@ class LlamaConfig(LlamaConfig):
         flash_attention_fp8=False,
         **kwargs,
     ):
+        print('Start:', LlamaConfig)
         super().__init__(
             vocab_size,
             hidden_size,
@@ -59,3 +60,4 @@ class LlamaConfig(LlamaConfig):
         self.fused_qkv = fused_qkv
         self.parallel_strategy = parallel_strategy
         self.flash_attention_fp8 = flash_attention_fp8
+        print('End:', LlamaConfig)

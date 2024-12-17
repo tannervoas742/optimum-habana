@@ -166,6 +166,11 @@ class GaudiGenerationMixin(GenerationMixin):
     sizes allows to make the most of lazy mode and HPU graphs.
     """
 
+    def __init__(self, *args, **kwargs):
+        print('Start:', GaudiGenerationMixin)
+        super().__init__(self, *args, **kwargs)
+        print('End:', GaudiGenerationMixin)
+
     def _get_hpu_graphs_kwargs(self, model_kwargs):
         hpu_graphs_kwargs = {}
         if model_kwargs["limit_hpu_graphs"]:
